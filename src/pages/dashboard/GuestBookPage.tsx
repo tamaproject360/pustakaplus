@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { BookUser, Clock, CheckCircle, Plus } from 'lucide-react';
-import { supabase } from '../../lib/supabase';
+import api from '../../lib/api';
 import { GuestBook } from '../../lib/types';
 import { useAuth } from '../../contexts/AuthContext';
 import LoadingSpinner from '../../components/ui/LoadingSpinner';
@@ -8,70 +8,59 @@ import EmptyState from '../../components/ui/EmptyState';
 import Modal from '../../components/ui/Modal';
 import { formatDateTime, purposeLabels } from '../../lib/utils';
 
+interface GuestBookStats {
+  today: number;
+  week: number;
+  month: number;
+}
+
 export default function GuestBookPage() {
-  const { profile, user } = useAuth();
+  const { profile } = useAuth();
   const [entries, setEntries] = useState<GuestBook[]>([]);
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
   const [purpose, setPurpose] = useState('pinjam_buku');
   const [purposeNote, setPurposeNote] = useState('');
   const [saving, setSaving] = useState(false);
-  const [stats, setStats] = useState({ today: 0, week: 0, month: 0 });
+  const [stats, setStats] = useState<GuestBookStats>({ today: 0, week: 0, month: 0 });
 
   const isStaff = profile?.role === 'pustakawan' || profile?.role === 'super_admin';
 
   const fetchEntries = useCallback(async () => {
     setLoading(true);
-    let q = supabase
-      .from('guest_book')
-      .select('*, user:profiles!user_id(id, name, unit_kerja)')
-      .order('visit_date', { ascending: false });
-
-    if (!isStaff) q = q.eq('user_id', user?.id || '');
-    q = q.limit(50);
-
-    const { data } = await q;
-    if (data) setEntries(data as GuestBook[]);
-
-    if (isStaff) {
-      const now = new Date();
-      const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
-      const weekStart = new Date(now.getTime() - 7 * 86400000).toISOString();
-      const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
-
-      const [todayRes, weekRes, monthRes] = await Promise.all([
-        supabase.from('guest_book').select('id', { count: 'exact', head: true }).gte('visit_date', todayStart),
-        supabase.from('guest_book').select('id', { count: 'exact', head: true }).gte('visit_date', weekStart),
-        supabase.from('guest_book').select('id', { count: 'exact', head: true }).gte('visit_date', monthStart),
-      ]);
-      setStats({ today: todayRes.count || 0, week: weekRes.count || 0, month: monthRes.count || 0 });
-    }
+    try {
+      const res = await api.get<{ entries: GuestBook[]; stats?: GuestBookStats }>('/guest-book');
+      if (res.data) {
+        setEntries(res.data.entries || (res.data as unknown as GuestBook[]));
+        if (res.data.stats) setStats(res.data.stats);
+      }
+    } catch {}
     setLoading(false);
-  }, [isStaff, user?.id]);
+  }, [isStaff, profile?.id]);
 
   useEffect(() => { fetchEntries(); }, [fetchEntries]);
 
   const handleCheckIn = async () => {
-    if (!user || !profile) return;
+    if (!profile) return;
     setSaving(true);
-    await supabase.from('guest_book').insert({
-      user_id: user.id,
-      purpose,
-      purpose_note: purposeNote,
-    });
+    try {
+      await api.post('/guest-book/check-in', { purpose, purposeNote });
+      setShowModal(false);
+      setPurpose('pinjam_buku');
+      setPurposeNote('');
+      fetchEntries();
+    } catch {}
     setSaving(false);
-    setShowModal(false);
-    setPurpose('pinjam_buku');
-    setPurposeNote('');
-    fetchEntries();
   };
 
   const handleCheckOut = async (id: string) => {
-    await supabase.from('guest_book').update({ check_out_time: new Date().toISOString() }).eq('id', id);
-    fetchEntries();
+    try {
+      await api.put(`/guest-book/${id}/check-out`);
+      fetchEntries();
+    } catch {}
   };
 
-  const todayEntry = entries.find(e => e.user_id === user?.id && !e.check_out_time && new Date(e.visit_date).toDateString() === new Date().toDateString());
+  const todayEntry = entries.find(e => e.user_id === profile?.id && !e.check_out_time && new Date(e.visit_date).toDateString() === new Date().toDateString());
 
   return (
     <div className="space-y-5">

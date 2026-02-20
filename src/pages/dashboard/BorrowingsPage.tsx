@@ -1,13 +1,13 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Search, BookMarked, AlertCircle, CheckCircle, Clock, Plus } from 'lucide-react';
-import { supabase } from '../../lib/supabase';
+import { Search, BookMarked, AlertCircle, CheckCircle } from 'lucide-react';
+import api from '../../lib/api';
 import { Borrowing } from '../../lib/types';
 import { useAuth } from '../../contexts/AuthContext';
 import LoadingSpinner from '../../components/ui/LoadingSpinner';
 import EmptyState from '../../components/ui/EmptyState';
 import Badge from '../../components/ui/Badge';
 import Modal from '../../components/ui/Modal';
-import { formatDate, formatDateTime, formatCurrency, statusColors, statusLabels, isOverdue } from '../../lib/utils';
+import { formatDate, formatCurrency, statusColors, statusLabels, isOverdue } from '../../lib/utils';
 
 export default function BorrowingsPage() {
   const { profile } = useAuth();
@@ -22,29 +22,20 @@ export default function BorrowingsPage() {
 
   const fetchBorrowings = useCallback(async () => {
     setLoading(true);
-    let q = supabase
-      .from('borrowings')
-      .select('*, collection:collections(id, title, cover_url, format), user:profiles!user_id(id, name, email)')
-      .order('created_at', { ascending: false });
-
-    if (!isStaff) q = q.eq('user_id', profile?.id || '');
-    if (statusFilter) q = q.eq('status', statusFilter);
-    const { data } = await q;
-    if (data) {
-      const processed = (data as Borrowing[]).map(b => ({
-        ...b,
-        status: b.return_date ? 'dikembalikan' : isOverdue(b.due_date) && b.status === 'dipinjam' ? 'terlambat' : b.status,
-      }));
-      if (search) {
-        const filtered = processed.filter(b =>
-          b.collection?.title?.toLowerCase().includes(search.toLowerCase()) ||
-          b.user?.name?.toLowerCase().includes(search.toLowerCase())
-        );
-        setBorrowings(filtered);
-      } else {
+    try {
+      const params = new URLSearchParams();
+      if (statusFilter) params.set('status', statusFilter);
+      if (search) params.set('search', search);
+      const query = params.toString() ? `?${params.toString()}` : '';
+      const res = await api.get<Borrowing[]>(`/borrowings${query}`);
+      if (res.data) {
+        const processed = res.data.map(b => ({
+          ...b,
+          status: b.return_date ? 'dikembalikan' : isOverdue(b.due_date) && b.status === 'dipinjam' ? 'terlambat' : b.status,
+        }));
         setBorrowings(processed);
       }
-    }
+    } catch {}
     setLoading(false);
   }, [isStaff, profile?.id, statusFilter, search]);
 
@@ -53,30 +44,12 @@ export default function BorrowingsPage() {
   const handleReturn = async () => {
     if (!returnModal) return;
     setReturning(true);
-    const returnDate = new Date();
-    const dueDate = new Date(returnModal.due_date);
-    const daysLate = Math.max(0, Math.ceil((returnDate.getTime() - dueDate.getTime()) / 86400000));
-    const finePerDay = 1000;
-    const fineAmount = daysLate * finePerDay;
-
-    await supabase.from('borrowings').update({
-      return_date: returnDate.toISOString(),
-      status: 'dikembalikan',
-      fine_amount: fineAmount,
-    }).eq('id', returnModal.id);
-
-    await supabase.from('collections').update({
-      available_copies: supabase.rpc('increment_available_copies', { collection_id: returnModal.collection_id })
-    }).eq('id', returnModal.collection_id);
-
-    const { data: col } = await supabase.from('collections').select('available_copies').eq('id', returnModal.collection_id).single();
-    if (col) {
-      await supabase.from('collections').update({ available_copies: (col.available_copies || 0) + 1 }).eq('id', returnModal.collection_id);
-    }
-
+    try {
+      await api.put(`/borrowings/${returnModal.id}/return`);
+      setReturnModal(null);
+      fetchBorrowings();
+    } catch {}
     setReturning(false);
-    setReturnModal(null);
-    fetchBorrowings();
   };
 
   const stats = {

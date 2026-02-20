@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Bell, CheckCheck, Info, AlertCircle, CheckCircle, XCircle } from 'lucide-react';
-import { supabase } from '../../lib/supabase';
+import api from '../../lib/api';
 import { Notification } from '../../lib/types';
 import { useAuth } from '../../contexts/AuthContext';
 import LoadingSpinner from '../../components/ui/LoadingSpinner';
@@ -22,32 +22,32 @@ const typeColors = {
 };
 
 export default function NotificationsPage() {
-  const { user } = useAuth();
+  const { profile } = useAuth();
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (!user) return;
-    supabase
-      .from('notifications')
-      .select('*')
-      .eq('user_id', user.id)
-      .order('created_at', { ascending: false })
-      .then(({ data }) => {
-        if (data) setNotifications(data as Notification[]);
+    if (!profile) return;
+    api.get<Notification[]>('/notifications')
+      .then(res => {
+        if (res.data) setNotifications(res.data);
         setLoading(false);
-      });
-  }, [user]);
+      })
+      .catch(() => setLoading(false));
+  }, [profile]);
 
   const markRead = async (id: string) => {
-    await supabase.from('notifications').update({ is_read: true }).eq('id', id);
-    setNotifications(prev => prev.map(n => n.id === id ? { ...n, is_read: true } : n));
+    try {
+      await api.put(`/notifications/${id}/read`);
+      setNotifications(prev => prev.map(n => n.id === id ? { ...n, is_read: true } : n));
+    } catch {}
   };
 
   const markAllRead = async () => {
-    if (!user) return;
-    await supabase.from('notifications').update({ is_read: true }).eq('user_id', user.id);
-    setNotifications(prev => prev.map(n => ({ ...n, is_read: true })));
+    try {
+      await api.put('/notifications/read-all');
+      setNotifications(prev => prev.map(n => ({ ...n, is_read: true })));
+    } catch {}
   };
 
   const unreadCount = notifications.filter(n => !n.is_read).length;

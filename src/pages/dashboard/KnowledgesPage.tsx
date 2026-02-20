@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Plus, Search, Edit, Trash2, Brain, Eye, Star, CheckCircle, XCircle } from 'lucide-react';
-import { supabase } from '../../lib/supabase';
+import api from '../../lib/api';
 import { Knowledge, Category } from '../../lib/types';
 import { useAuth } from '../../contexts/AuthContext';
 import LoadingSpinner from '../../components/ui/LoadingSpinner';
@@ -41,25 +41,21 @@ export default function KnowledgesPage() {
 
   const fetchData = useCallback(async () => {
     setLoading(true);
-    let q = supabase
-      .from('knowledges')
-      .select('*, category:categories(*), tags:knowledge_tags(*), submitter:profiles!submitted_by(id, name)')
-      .order('created_at', { ascending: false });
-
-    if (!isStaff) q = q.eq('submitted_by', profile?.id || '');
-    if (statusFilter) q = q.eq('status', statusFilter);
-    const { data } = await q;
-    if (data) {
-      const filtered = search
-        ? (data as Knowledge[]).filter(k => k.title.toLowerCase().includes(search.toLowerCase()))
-        : (data as Knowledge[]);
-      setItems(filtered);
-    }
+    try {
+      const params = new URLSearchParams();
+      if (statusFilter) params.set('status', statusFilter);
+      if (search) params.set('search', search);
+      const query = params.toString() ? `?${params.toString()}` : '';
+      const res = await api.get<Knowledge[]>(`/knowledges${query}`);
+      if (res.data) setItems(res.data);
+    } catch {}
     setLoading(false);
   }, [isStaff, profile?.id, statusFilter, search]);
 
   useEffect(() => {
-    supabase.from('categories').select('*').eq('type', 'knowledge').then(({ data }) => { if (data) setCategories(data); });
+    api.get<Category[]>('/dashboard/categories?type=knowledge')
+      .then(res => { if (res.data) setCategories(res.data); })
+      .catch(() => {});
   }, []);
 
   useEffect(() => { fetchData(); }, [fetchData]);
@@ -74,49 +70,46 @@ export default function KnowledgesPage() {
   const handleSave = async () => {
     if (!form.title) return;
     setSaving(true);
-    const payload = { title: form.title, summary: form.summary, content: form.content, type: form.type, category_id: form.category_id || null, file_url: form.file_url, submitted_by: profile?.id };
+    const payload = {
+      title: form.title, summary: form.summary, content: form.content,
+      type: form.type, categoryId: form.category_id || null, fileUrl: form.file_url,
+      tags: form.tags ? form.tags.split(',').map(t => t.trim()).filter(Boolean) : [],
+    };
 
-    let id = editItem?.id;
-    if (editItem) {
-      await supabase.from('knowledges').update(payload).eq('id', editItem.id);
-    } else {
-      const { data } = await supabase.from('knowledges').insert(payload).select().single();
-      if (data) id = data.id;
-    }
-
-    if (id && form.tags) {
-      await supabase.from('knowledge_tags').delete().eq('knowledge_id', id);
-      const tags = form.tags.split(',').map(t => t.trim()).filter(Boolean);
-      if (tags.length > 0) {
-        await supabase.from('knowledge_tags').insert(tags.map(tag => ({ knowledge_id: id, tag })));
+    try {
+      if (editItem) {
+        await api.put(`/knowledges/${editItem.id}`, payload);
+      } else {
+        await api.post('/knowledges', payload);
       }
-    }
-
+      setShowModal(false);
+      fetchData();
+    } catch {}
     setSaving(false);
-    setShowModal(false);
-    fetchData();
   };
 
   const handleSubmit = async (id: string) => {
-    await supabase.from('knowledges').update({ status: 'submitted' }).eq('id', id);
-    fetchData();
+    try {
+      await api.put(`/knowledges/${id}/submit`);
+      fetchData();
+    } catch {}
   };
 
   const handleReview = async (approved: boolean) => {
     if (!reviewModal) return;
-    const updateData = approved
-      ? { status: 'published', reviewed_by: profile?.id, published_at: new Date().toISOString() }
-      : { status: 'rejected', reviewed_by: profile?.id, rejection_feedback: feedback };
-    await supabase.from('knowledges').update(updateData).eq('id', reviewModal.id);
-    setReviewModal(null);
-    setFeedback('');
-    fetchData();
+    try {
+      await api.put(`/knowledges/${reviewModal.id}/review`, { approved, feedback });
+      setReviewModal(null);
+      setFeedback('');
+      fetchData();
+    } catch {}
   };
 
   const handleDelete = async (id: string) => {
-    await supabase.from('knowledge_tags').delete().eq('knowledge_id', id);
-    await supabase.from('knowledges').delete().eq('id', id);
-    fetchData();
+    try {
+      await api.delete(`/knowledges/${id}`);
+      fetchData();
+    } catch {}
   };
 
   return (

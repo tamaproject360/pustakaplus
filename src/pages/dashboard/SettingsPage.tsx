@@ -1,36 +1,38 @@
 import { useState, useEffect } from 'react';
-import { Settings, Save, RefreshCw } from 'lucide-react';
-import { supabase } from '../../lib/supabase';
+import { Save, RefreshCw } from 'lucide-react';
+import api from '../../lib/api';
 import { SystemConfig } from '../../lib/types';
-import { useAuth } from '../../contexts/AuthContext';
 import LoadingSpinner from '../../components/ui/LoadingSpinner';
 
 export default function SettingsPage() {
-  const { profile } = useAuth();
-  const [configs, setConfigs] = useState<SystemConfig[]>([]);
+  const [, setConfigs] = useState<SystemConfig[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState<string | null>(null);
   const [values, setValues] = useState<Record<string, string>>({});
   const [saved, setSaved] = useState<string | null>(null);
 
   useEffect(() => {
-    supabase.from('system_config').select('*').order('key').then(({ data }) => {
-      if (data) {
-        setConfigs(data as SystemConfig[]);
-        const v: Record<string, string> = {};
-        (data as SystemConfig[]).forEach(c => { v[c.key] = c.value; });
-        setValues(v);
-      }
-      setLoading(false);
-    });
+    api.get<SystemConfig[]>('/settings')
+      .then(res => {
+        if (res.data) {
+          setConfigs(res.data);
+          const v: Record<string, string> = {};
+          res.data.forEach(c => { v[c.key] = c.value; });
+          setValues(v);
+        }
+        setLoading(false);
+      })
+      .catch(() => setLoading(false));
   }, []);
 
   const handleSave = async (key: string) => {
     setSaving(key);
-    await supabase.from('system_config').update({ value: values[key], updated_by: profile?.id, updated_at: new Date().toISOString() }).eq('key', key);
+    try {
+      await api.put(`/settings/${key}`, { value: values[key] });
+      setSaved(key);
+      setTimeout(() => setSaved(null), 2000);
+    } catch {}
     setSaving(null);
-    setSaved(key);
-    setTimeout(() => setSaved(null), 2000);
   };
 
   if (loading) return <LoadingSpinner className="py-20" />;

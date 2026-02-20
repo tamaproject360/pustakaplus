@@ -1,76 +1,70 @@
 import { useState, useEffect } from 'react';
-import { BarChart3, Download, TrendingUp, BookOpen, Brain, BookUser } from 'lucide-react';
+import { Download } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, LineChart, Line, Legend } from 'recharts';
-import { supabase } from '../../lib/supabase';
+import api from '../../lib/api';
 import LoadingSpinner from '../../components/ui/LoadingSpinner';
 
 const COLORS = ['#1B3A5C', '#F59E0B', '#10B981', '#3B82F6', '#EF4444', '#8B5CF6'];
 
+interface ReportStats {
+  totalBorrowings: number;
+  activeBorrowings: number;
+  overdueBorrowings: number;
+  totalFine: number;
+}
+
+interface CollectionByFormat {
+  name: string;
+  value: number;
+}
+
+interface BorrowingByMonth {
+  month: string;
+  borrowings: number;
+  returned: number;
+}
+
+interface KnowledgeByType {
+  name: string;
+  value: number;
+}
+
+interface TopCollection {
+  title: string;
+  count: number;
+}
+
 export default function ReportsPage() {
   const [loading, setLoading] = useState(true);
-  const [collectionByFormat, setCollectionByFormat] = useState<{ name: string; value: number }[]>([]);
-  const [borrowingsByMonth, setBorrowingsByMonth] = useState<{ month: string; borrowings: number; returned: number }[]>([]);
-  const [knowledgeByType, setKnowledgeByType] = useState<{ name: string; value: number }[]>([]);
-  const [topCollections, setTopCollections] = useState<{ title: string; count: number }[]>([]);
-  const [stats, setStats] = useState({ total: 0, active: 0, overdue: 0, fine: 0 });
+  const [collectionByFormat, setCollectionByFormat] = useState<CollectionByFormat[]>([]);
+  const [borrowingsByMonth, setBorrowingsByMonth] = useState<BorrowingByMonth[]>([]);
+  const [knowledgeByType, setKnowledgeByType] = useState<KnowledgeByType[]>([]);
+  const [topCollections, setTopCollections] = useState<TopCollection[]>([]);
+  const [stats, setStats] = useState<ReportStats>({ totalBorrowings: 0, activeBorrowings: 0, overdueBorrowings: 0, totalFine: 0 });
 
   useEffect(() => {
     const fetchData = async () => {
-      const [collectionsRes, borrowingsRes, knowledgesRes] = await Promise.all([
-        supabase.from('collections').select('format'),
-        supabase.from('borrowings').select('status, fine_amount, collection_id, borrow_date'),
-        supabase.from('knowledges').select('type, status'),
-      ]);
+      try {
+        const [collectionsRes, borrowingsRes, knowledgesRes] = await Promise.all([
+          api.get<{ byFormat: CollectionByFormat[] }>('/dashboard/reports/collections'),
+          api.get<{ stats: ReportStats; byMonth: BorrowingByMonth[]; topCollections: TopCollection[] }>('/dashboard/reports/borrowings'),
+          api.get<{ byType: KnowledgeByType[] }>('/dashboard/reports/knowledges'),
+        ]);
 
-      if (collectionsRes.data) {
-        const counts: Record<string, number> = {};
-        collectionsRes.data.forEach((c: { format: string }) => { counts[c.format] = (counts[c.format] || 0) + 1; });
-        const labels: Record<string, string> = { buku: 'Buku', jurnal: 'Jurnal', ebook: 'E-Book', multimedia: 'Multimedia' };
-        setCollectionByFormat(Object.entries(counts).map(([k, v]) => ({ name: labels[k] || k, value: v })));
-      }
-
-      if (borrowingsRes.data) {
-        const all = borrowingsRes.data as { status: string; fine_amount: number; collection_id: string; borrow_date: string }[];
-        setStats({
-          total: all.length,
-          active: all.filter(b => b.status === 'dipinjam').length,
-          overdue: all.filter(b => b.status === 'terlambat').length,
-          fine: all.reduce((s, b) => s + (b.fine_amount || 0), 0),
-        });
-
-        const months = ['Jan','Feb','Mar','Apr','Mei','Jun','Jul','Ags','Sep','Okt','Nov','Des'];
-        const currentMonth = new Date().getMonth();
-        const monthData = Array.from({ length: 6 }, (_, i) => {
-          const mIdx = (currentMonth - 5 + i + 12) % 12;
-          const mLabel = months[mIdx];
-          const mBorrowings = all.filter(b => new Date(b.borrow_date).getMonth() === mIdx).length;
-          return { month: mLabel, borrowings: mBorrowings, returned: Math.floor(mBorrowings * 0.7) };
-        });
-        setBorrowingsByMonth(monthData);
-
-        const collectionCount: Record<string, number> = {};
-        all.forEach(b => { collectionCount[b.collection_id] = (collectionCount[b.collection_id] || 0) + 1; });
-        const topIds = Object.entries(collectionCount).sort((a, b) => b[1] - a[1]).slice(0, 5);
-        if (topIds.length > 0) {
-          const { data: cols } = await supabase.from('collections').select('id, title').in('id', topIds.map(t => t[0]));
-          if (cols) {
-            setTopCollections(topIds.map(([id, count]) => ({
-              title: (cols as { id: string; title: string }[]).find(c => c.id === id)?.title || 'Unknown',
-              count,
-            })));
-          }
+        if (collectionsRes.data) {
+          setCollectionByFormat(collectionsRes.data.byFormat || []);
         }
-      }
 
-      if (knowledgesRes.data) {
-        const typeLabels: Record<string, string> = { artikel: 'Artikel', sop: 'SOP', panduan: 'Panduan', lesson_learned: 'Lesson Learned', best_practice: 'Best Practice' };
-        const counts: Record<string, number> = {};
-        knowledgesRes.data.forEach((k: { type: string; status: string }) => {
-          if (k.status === 'published') counts[k.type] = (counts[k.type] || 0) + 1;
-        });
-        setKnowledgeByType(Object.entries(counts).map(([k, v]) => ({ name: typeLabels[k] || k, value: v })));
-      }
+        if (borrowingsRes.data) {
+          setStats(borrowingsRes.data.stats || { totalBorrowings: 0, activeBorrowings: 0, overdueBorrowings: 0, totalFine: 0 });
+          setBorrowingsByMonth(borrowingsRes.data.byMonth || []);
+          setTopCollections(borrowingsRes.data.topCollections || []);
+        }
 
+        if (knowledgesRes.data) {
+          setKnowledgeByType(knowledgesRes.data.byType || []);
+        }
+      } catch {}
       setLoading(false);
     };
     fetchData();
@@ -93,10 +87,10 @@ export default function ReportsPage() {
       {/* Summary Stats */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         {[
-          { label: 'Total Peminjaman', value: stats.total, color: 'bg-blue-50 text-blue-700' },
-          { label: 'Sedang Dipinjam', value: stats.active, color: 'bg-amber-50 text-amber-700' },
-          { label: 'Terlambat', value: stats.overdue, color: 'bg-red-50 text-red-700' },
-          { label: 'Total Denda', value: `Rp ${stats.fine.toLocaleString()}`, color: 'bg-green-50 text-green-700' },
+          { label: 'Total Peminjaman', value: stats.totalBorrowings, color: 'bg-blue-50 text-blue-700' },
+          { label: 'Sedang Dipinjam', value: stats.activeBorrowings, color: 'bg-amber-50 text-amber-700' },
+          { label: 'Terlambat', value: stats.overdueBorrowings, color: 'bg-red-50 text-red-700' },
+          { label: 'Total Denda', value: `Rp ${stats.totalFine.toLocaleString()}`, color: 'bg-green-50 text-green-700' },
         ].map((s, i) => (
           <div key={i} className={`p-5 rounded-xl ${s.color.split(' ')[0]}`}>
             <p className="text-2xl font-bold">{s.value}</p>

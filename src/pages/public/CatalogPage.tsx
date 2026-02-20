@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { Search, SlidersHorizontal, Grid3X3, List, X, ChevronDown } from 'lucide-react';
-import { supabase } from '../../lib/supabase';
+import api from '../../lib/api';
 import { Collection, Category } from '../../lib/types';
 import CollectionCard from '../../components/catalog/CollectionCard';
 import LoadingSpinner from '../../components/ui/LoadingSpinner';
@@ -32,30 +32,23 @@ export default function CatalogPage() {
 
   const fetchData = useCallback(async () => {
     setLoading(true);
-    let q = supabase
-      .from('collections')
-      .select('*, category:categories(*), tags:collection_tags(*)', { count: 'exact' });
+    const params = new URLSearchParams();
+    if (query) params.set('search', query);
+    if (filters.format) params.set('format', filters.format);
+    if (filters.categoryId) params.set('categoryId', filters.categoryId);
+    if (filters.language) params.set('language', filters.language);
+    params.set('page', String(page));
+    params.set('limit', String(PAGE_SIZE));
 
-    if (query) {
-      q = q.or(`title.ilike.%${query}%,author.ilike.%${query}%,isbn.ilike.%${query}%,subject.ilike.%${query}%,publisher.ilike.%${query}%`);
-    }
-    if (filters.format) q = q.eq('format', filters.format);
-    if (filters.categoryId) q = q.eq('category_id', filters.categoryId);
-    if (filters.language) q = q.eq('language', filters.language);
-    if (filters.available) q = q.gt('available_copies', 0);
-
-    const from = (page - 1) * PAGE_SIZE;
-    q = q.range(from, from + PAGE_SIZE - 1).order('created_at', { ascending: false });
-
-    const { data, count } = await q;
-    if (data) setCollections(data as Collection[]);
-    if (count !== null) setTotal(count);
+    const res = await api.get<Collection[]>(`/collections?${params.toString()}`);
+    if (res.data) setCollections(res.data);
+    if (res.meta) setTotal(res.meta.total);
     setLoading(false);
   }, [query, filters, page]);
 
   useEffect(() => {
-    supabase.from('categories').select('*').eq('type', 'perpustakaan').then(({ data }) => {
-      if (data) setCategories(data);
+    api.get<Category[]>('/dashboard/categories?type=perpustakaan').then(res => {
+      if (res.data) setCategories(res.data);
     });
   }, []);
 

@@ -1,0 +1,321 @@
+// Prisma schema for PustakaPlus
+// Backend: Express + PostgreSQL + Prisma
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  super_admin
+  pustakawan
+  kontributor
+  pembaca
+}
+
+enum CategoryType {
+  perpustakaan
+  knowledge
+}
+
+enum CollectionFormat {
+  buku
+  jurnal
+  ebook
+  multimedia
+}
+
+enum BorrowStatus {
+  dipinjam
+  dikembalikan
+  terlambat
+}
+
+enum ReservationStatus {
+  menunggu
+  tersedia
+  dibatalkan
+  selesai
+}
+
+enum KnowledgeType {
+  artikel
+  sop
+  panduan
+  lesson_learned
+  best_practice
+}
+
+enum KnowledgeStatus {
+  draft
+  submitted
+  approved
+  rejected
+  published
+}
+
+enum VisitPurpose {
+  pinjam_buku
+  baca_di_tempat
+  riset
+  meeting
+  lainnya
+}
+
+enum NotifType {
+  info
+  warning
+  success
+  error
+}
+
+enum NotifChannel {
+  in_app
+  email
+  both
+}
+
+model User {
+  id           String   @id @default(uuid())
+  name         String
+  email        String   @unique
+  passwordHash String   @map("password_hash")
+  role         UserRole @default(pembaca)
+  unitKerja    String?  @map("unit_kerja")
+  avatarUrl    String?  @map("avatar_url")
+  isActive     Boolean  @default(true) @map("is_active")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  collectionsCreated  Collection[]   @relation("CreatedBy")
+  borrowings          Borrowing[]    @relation("UserBorrowings")
+  processedBorrowings Borrowing[]    @relation("ProcessedBy")
+  reservations        Reservation[]
+  knowledgesSubmitted Knowledge[]    @relation("SubmittedBy")
+  knowledgesReviewed  Knowledge[]    @relation("ReviewedBy")
+  ratings             Rating[]
+  guestBookEntries    GuestBook[]
+  notifications       Notification[]
+  auditLogs           AuditLog[]
+  systemConfigUpdated SystemConfig[]
+
+  @@map("users")
+}
+
+model Category {
+  id        String       @id @default(uuid())
+  name      String
+  slug      String       @unique
+  parentId  String?      @map("parent_id")
+  type      CategoryType
+  createdAt DateTime     @default(now()) @map("created_at")
+
+  parent     Category?   @relation("CategoryParent", fields: [parentId], references: [id])
+  children   Category[]  @relation("CategoryParent")
+  collections Collection[]
+  knowledges  Knowledge[]
+
+  @@map("categories")
+}
+
+model Collection {
+  id                  String           @id @default(uuid())
+  title               String
+  author              String?
+  publisher           String?
+  publishYear         Int?             @map("publish_year")
+  isbn                String?
+  issn                String?
+  format              CollectionFormat @default(buku)
+  language            String           @default("id")
+  subject             String?
+  description         String?
+  coverUrl            String?          @map("cover_url")
+  fileUrl             String?          @map("file_url")
+  barcode             String?          @unique
+  qrCode              String?          @unique @map("qr_code")
+  shelfLocation       String?          @map("shelf_location")
+  totalCopies         Int              @default(1) @map("total_copies")
+  availableCopies     Int              @default(1) @map("available_copies")
+  marc21Data          Json?            @map("marc21_data")
+  dublinCoreMetadata  Json?            @map("dublin_core_metadata")
+  isFeatured          Boolean          @default(false) @map("is_featured")
+  categoryId          String?          @map("category_id")
+  createdBy           String?          @map("created_by")
+  createdAt           DateTime         @default(now()) @map("created_at")
+  updatedAt           DateTime         @updatedAt @map("updated_at")
+
+  category    Category?       @relation(fields: [categoryId], references: [id])
+  creator     User?           @relation("CreatedBy", fields: [createdBy], references: [id])
+  tags        CollectionTag[]
+  borrowings  Borrowing[]
+  reservations Reservation[]
+
+  @@map("collections")
+}
+
+model CollectionTag {
+  id           String @id @default(uuid())
+  collectionId String @map("collection_id")
+  tag          String
+
+  collection Collection @relation(fields: [collectionId], references: [id], onDelete: Cascade)
+
+  @@map("collection_tags")
+}
+
+model Borrowing {
+  id           String       @id @default(uuid())
+  userId       String       @map("user_id")
+  collectionId String       @map("collection_id")
+  borrowDate   DateTime     @default(now()) @map("borrow_date")
+  dueDate      DateTime     @map("due_date")
+  returnDate   DateTime?    @map("return_date")
+  status       BorrowStatus @default(dipinjam)
+  fineAmount   Decimal      @default(0) @map("fine_amount") @db.Decimal(10, 2)
+  finePaid     Boolean      @default(false) @map("fine_paid")
+  notes        String?
+  processedBy  String?      @map("processed_by")
+  createdAt    DateTime     @default(now()) @map("created_at")
+
+  user       User       @relation("UserBorrowings", fields: [userId], references: [id])
+  collection Collection @relation(fields: [collectionId], references: [id])
+  processor  User?      @relation("ProcessedBy", fields: [processedBy], references: [id])
+
+  @@map("borrowings")
+}
+
+model Reservation {
+  id              String            @id @default(uuid())
+  userId          String            @map("user_id")
+  collectionId    String            @map("collection_id")
+  reservationDate DateTime          @default(now()) @map("reservation_date")
+  status          ReservationStatus @default(menunggu)
+  queuePosition   Int?              @map("queue_position")
+  notifiedAt      DateTime?         @map("notified_at")
+  createdAt       DateTime          @default(now()) @map("created_at")
+
+  user       User       @relation(fields: [userId], references: [id])
+  collection Collection @relation(fields: [collectionId], references: [id])
+
+  @@map("reservations")
+}
+
+model Knowledge {
+  id                 String          @id @default(uuid())
+  title              String
+  content            String?
+  summary            String?
+  type               KnowledgeType
+  fileUrl            String?         @map("file_url")
+  fileType           String?         @map("file_type")
+  thumbnailUrl       String?         @map("thumbnail_url")
+  dublinCoreMetadata Json?           @map("dublin_core_metadata")
+  status             KnowledgeStatus @default(draft)
+  rejectionFeedback  String?         @map("rejection_feedback")
+  viewsCount         Int             @default(0) @map("views_count")
+  averageRating      Decimal         @default(0) @map("average_rating") @db.Decimal(3, 2)
+  categoryId         String?         @map("category_id")
+  submittedBy        String?         @map("submitted_by")
+  reviewedBy         String?         @map("reviewed_by")
+  publishedAt        DateTime?       @map("published_at")
+  createdAt          DateTime        @default(now()) @map("created_at")
+  updatedAt          DateTime        @updatedAt @map("updated_at")
+
+  category  Category?      @relation(fields: [categoryId], references: [id])
+  submitter User?          @relation("SubmittedBy", fields: [submittedBy], references: [id])
+  reviewer  User?          @relation("ReviewedBy", fields: [reviewedBy], references: [id])
+  tags      KnowledgeTag[]
+  ratings   Rating[]
+
+  @@map("knowledges")
+}
+
+model KnowledgeTag {
+  id          String @id @default(uuid())
+  knowledgeId String @map("knowledge_id")
+  tag         String
+
+  knowledge Knowledge @relation(fields: [knowledgeId], references: [id], onDelete: Cascade)
+
+  @@map("knowledge_tags")
+}
+
+model Rating {
+  id          String   @id @default(uuid())
+  knowledgeId String   @map("knowledge_id")
+  userId      String   @map("user_id")
+  rating      Int
+  review      String?
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  knowledge Knowledge @relation(fields: [knowledgeId], references: [id], onDelete: Cascade)
+  user      User      @relation(fields: [userId], references: [id])
+
+  @@unique([knowledgeId, userId])
+  @@map("ratings")
+}
+
+model GuestBook {
+  id           String       @id @default(uuid())
+  userId       String       @map("user_id")
+  visitDate    DateTime     @default(now()) @map("visit_date")
+  purpose      VisitPurpose
+  purposeNote  String?      @map("purpose_note")
+  checkOutTime DateTime?    @map("check_out_time")
+  createdAt    DateTime     @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@map("guest_book")
+}
+
+model Notification {
+  id                String       @id @default(uuid())
+  userId            String       @map("user_id")
+  title             String
+  message           String
+  type              NotifType    @default(info)
+  channel           NotifChannel @default(in_app)
+  isRead            Boolean      @default(false) @map("is_read")
+  relatedEntityType String?      @map("related_entity_type")
+  relatedEntityId   String?      @map("related_entity_id")
+  createdAt         DateTime     @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@map("notifications")
+}
+
+model AuditLog {
+  id         String   @id @default(uuid())
+  userId     String?  @map("user_id")
+  action     String
+  entityType String   @map("entity_type")
+  entityId   String?  @map("entity_id")
+  details    Json?
+  ipAddress  String?  @map("ip_address")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  user User? @relation(fields: [userId], references: [id])
+
+  @@map("audit_logs")
+}
+
+model SystemConfig {
+  id          String   @id @default(uuid())
+  key         String   @unique
+  value       String
+  description String?
+  updatedBy   String?  @map("updated_by")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  updater User? @relation(fields: [updatedBy], references: [id])
+
+  @@map("system_config")
+}

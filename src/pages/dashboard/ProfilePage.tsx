@@ -1,25 +1,27 @@
 import { useState } from 'react';
 import { User, Mail, Building2, Shield, Save, CheckCircle } from 'lucide-react';
-import { supabase } from '../../lib/supabase';
+import api from '../../lib/api';
 import { useAuth } from '../../contexts/AuthContext';
 import { roleLabels, roleColors, formatDate } from '../../lib/utils';
 import Badge from '../../components/ui/Badge';
 
 export default function ProfilePage() {
-  const { profile, user, refreshProfile } = useAuth();
+  const { profile, refreshProfile } = useAuth();
   const [form, setForm] = useState({ name: profile?.name || '', unit_kerja: profile?.unit_kerja || '' });
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!user) return;
+    if (!profile) return;
     setSaving(true);
-    await supabase.from('profiles').update({ name: form.name, unit_kerja: form.unit_kerja }).eq('id', user.id);
-    await refreshProfile();
+    try {
+      await api.put('/auth/profile', { name: form.name, unitKerja: form.unit_kerja });
+      await refreshProfile();
+      setSaved(true);
+      setTimeout(() => setSaved(false), 3000);
+    } catch {}
     setSaving(false);
-    setSaved(true);
-    setTimeout(() => setSaved(false), 3000);
   };
 
   if (!profile) return null;

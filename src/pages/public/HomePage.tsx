@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { useNavigate } from 'react-router-dom';
 import { Search, BookOpen, Brain, Users, TrendingUp, ChevronRight, Star, ArrowRight, BookMarked } from 'lucide-react';
-import { supabase } from '../../lib/supabase';
+import api from '../../lib/api';
 import { Collection, Knowledge } from '../../lib/types';
 import CollectionCard from '../../components/catalog/CollectionCard';
 import KnowledgeCard from '../../components/knowledge/KnowledgeCard';
@@ -19,28 +19,29 @@ export default function HomePage() {
   useEffect(() => {
     const fetchData = async () => {
       const [collectionsRes, knowledgeRes, statsRes] = await Promise.all([
-        supabase.from('collections').select('*, category:categories(*), tags:collection_tags(*)').eq('is_featured', true).limit(8),
-        supabase.from('knowledges').select('*, category:categories(*), tags:knowledge_tags(*), submitter:profiles!submitted_by(id, name)').eq('status', 'published').order('published_at', { ascending: false }).limit(6),
-        Promise.all([
-          supabase.from('collections').select('id', { count: 'exact', head: true }),
-          supabase.from('knowledges').select('id', { count: 'exact', head: true }).eq('status', 'published'),
-          supabase.from('profiles').select('id', { count: 'exact', head: true }),
-          supabase.from('borrowings').select('id', { count: 'exact', head: true }),
-        ]),
+        api.get<Collection[]>('/collections/featured'),
+        api.get<Knowledge[]>('/knowledges?status=published&sort=newest&limit=6'),
+        api.get<{
+          totalCollections: number;
+          publishedKnowledge: number;
+          totalUsers: number;
+          totalBorrowings: number;
+        }>('/dashboard/stats'),
       ]);
 
-      if (collectionsRes.data) setFeaturedCollections(collectionsRes.data as Collection[]);
-      if (knowledgeRes.data) setRecentKnowledge(knowledgeRes.data as Knowledge[]);
-      const [c, k, u, b] = statsRes;
-      setStats({
-        collections: c.count || 0,
-        knowledge: k.count || 0,
-        users: u.count || 0,
-        borrowings: b.count || 0,
-      });
+      if (collectionsRes.data) setFeaturedCollections(collectionsRes.data);
+      if (knowledgeRes.data) setRecentKnowledge(knowledgeRes.data);
+      if (statsRes.data) {
+        setStats({
+          collections: statsRes.data.totalCollections,
+          knowledge: statsRes.data.publishedKnowledge,
+          users: statsRes.data.totalUsers,
+          borrowings: statsRes.data.totalBorrowings,
+        });
+      }
       setLoading(false);
     };
-    fetchData();
+    fetchData().catch(() => setLoading(false));
   }, []);
 
   const handleSearch = (e: React.FormEvent) => {

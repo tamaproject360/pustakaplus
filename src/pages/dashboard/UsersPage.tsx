@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Plus, Search, Edit, Trash2, Users, Shield, BookOpen, Brain, User } from 'lucide-react';
-import { supabase } from '../../lib/supabase';
+import { Search, Edit, Users, Shield, BookOpen, Brain, User } from 'lucide-react';
+import api from '../../lib/api';
 import { Profile, UserRole } from '../../lib/types';
 import { useAuth } from '../../contexts/AuthContext';
 import LoadingSpinner from '../../components/ui/LoadingSpinner';
@@ -22,15 +22,14 @@ export default function UsersPage() {
 
   const fetchUsers = useCallback(async () => {
     setLoading(true);
-    let q = supabase.from('profiles').select('*').order('created_at', { ascending: false });
-    if (roleFilter) q = q.eq('role', roleFilter);
-    const { data } = await q;
-    if (data) {
-      const filtered = search
-        ? (data as Profile[]).filter(u => u.name.toLowerCase().includes(search.toLowerCase()) || u.email.toLowerCase().includes(search.toLowerCase()))
-        : (data as Profile[]);
-      setUsers(filtered);
-    }
+    try {
+      const params = new URLSearchParams();
+      if (roleFilter) params.set('role', roleFilter);
+      if (search) params.set('search', search);
+      const query = params.toString() ? `?${params.toString()}` : '';
+      const res = await api.get<Profile[]>(`/users${query}`);
+      if (res.data) setUsers(res.data);
+    } catch {}
     setLoading(false);
   }, [roleFilter, search]);
 
@@ -45,15 +44,19 @@ export default function UsersPage() {
   const handleSave = async () => {
     if (!editUser) return;
     setSaving(true);
-    await supabase.from('profiles').update({ name: form.name, role: form.role, unit_kerja: form.unit_kerja, is_active: form.is_active }).eq('id', editUser.id);
+    try {
+      await api.put(`/users/${editUser.id}`, { name: form.name, role: form.role, unitKerja: form.unit_kerja, isActive: form.is_active });
+      setShowModal(false);
+      fetchUsers();
+    } catch {}
     setSaving(false);
-    setShowModal(false);
-    fetchUsers();
   };
 
   const handleToggleActive = async (u: Profile) => {
-    await supabase.from('profiles').update({ is_active: !u.is_active }).eq('id', u.id);
-    fetchUsers();
+    try {
+      await api.put(`/users/${u.id}/toggle-active`);
+      fetchUsers();
+    } catch {}
   };
 
   const roleStats = {

@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Calendar, X, Clock, CheckCircle } from 'lucide-react';
-import { supabase } from '../../lib/supabase';
+import { Calendar } from 'lucide-react';
+import api from '../../lib/api';
 import { Reservation } from '../../lib/types';
 import { useAuth } from '../../contexts/AuthContext';
 import LoadingSpinner from '../../components/ui/LoadingSpinner';
@@ -17,27 +17,27 @@ export default function ReservationsPage() {
 
   const fetchReservations = useCallback(async () => {
     setLoading(true);
-    let q = supabase
-      .from('reservations')
-      .select('*, collection:collections(id, title, cover_url, available_copies), user:profiles!user_id(id, name, email)')
-      .order('reservation_date', { ascending: false });
-
-    if (!isStaff) q = q.eq('user_id', profile?.id || '');
-    const { data } = await q;
-    if (data) setReservations(data as Reservation[]);
+    try {
+      const res = await api.get<Reservation[]>('/reservations');
+      if (res.data) setReservations(res.data);
+    } catch {}
     setLoading(false);
   }, [isStaff, profile?.id]);
 
   useEffect(() => { fetchReservations(); }, [fetchReservations]);
 
   const handleCancel = async (id: string) => {
-    await supabase.from('reservations').update({ status: 'dibatalkan' }).eq('id', id);
-    fetchReservations();
+    try {
+      await api.delete(`/reservations/${id}`);
+      fetchReservations();
+    } catch {}
   };
 
   const handleNotify = async (id: string) => {
-    await supabase.from('reservations').update({ status: 'tersedia', notified_at: new Date().toISOString() }).eq('id', id);
-    fetchReservations();
+    try {
+      await api.put(`/reservations/${id}/notify`);
+      fetchReservations();
+    } catch {}
   };
 
   return (

@@ -1,13 +1,13 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Plus, Search, Edit, Trash2, BookOpen, QrCode, Star, X, ChevronDown } from 'lucide-react';
-import { supabase } from '../../lib/supabase';
+import { Plus, Search, Edit, Trash2, BookOpen } from 'lucide-react';
+import api from '../../lib/api';
 import { Collection, Category } from '../../lib/types';
 import { useAuth } from '../../contexts/AuthContext';
 import LoadingSpinner from '../../components/ui/LoadingSpinner';
 import EmptyState from '../../components/ui/EmptyState';
 import Badge from '../../components/ui/Badge';
 import Modal from '../../components/ui/Modal';
-import { formatLabels, formatDate, generateBarcode } from '../../lib/utils';
+import { formatLabels } from '../../lib/utils';
 
 interface CollectionForm {
   title: string;
@@ -51,16 +51,21 @@ export default function CollectionsPage() {
 
   const fetchCollections = useCallback(async () => {
     setLoading(true);
-    let q = supabase.from('collections').select('*, category:categories(*), tags:collection_tags(*)').order('created_at', { ascending: false });
-    if (search) q = q.or(`title.ilike.%${search}%,author.ilike.%${search}%,isbn.ilike.%${search}%`);
-    if (formatFilter) q = q.eq('format', formatFilter);
-    const { data } = await q;
-    if (data) setCollections(data as Collection[]);
+    try {
+      const params = new URLSearchParams();
+      if (search) params.set('search', search);
+      if (formatFilter) params.set('format', formatFilter);
+      const query = params.toString() ? `?${params.toString()}` : '';
+      const res = await api.get<Collection[]>(`/collections${query}`);
+      if (res.data) setCollections(res.data);
+    } catch {}
     setLoading(false);
   }, [search, formatFilter]);
 
   useEffect(() => {
-    supabase.from('categories').select('*').eq('type', 'perpustakaan').then(({ data }) => { if (data) setCategories(data); });
+    api.get<Category[]>('/dashboard/categories?type=perpustakaan')
+      .then(res => { if (res.data) setCategories(res.data); })
+      .catch(() => {});
   }, []);
 
   useEffect(() => { fetchCollections(); }, [fetchCollections]);
@@ -107,28 +112,29 @@ export default function CollectionsPage() {
     setSaving(true);
     const payload = {
       title: form.title, author: form.author, publisher: form.publisher,
-      publish_year: form.publish_year ? parseInt(form.publish_year) : null,
+      publishYear: form.publish_year ? parseInt(form.publish_year) : null,
       isbn: form.isbn, issn: form.issn, format: form.format, language: form.language,
-      subject: form.subject, description: form.description, cover_url: form.cover_url,
-      shelf_location: form.shelf_location, total_copies: parseInt(form.total_copies) || 1,
-      available_copies: parseInt(form.total_copies) || 1,
-      category_id: form.category_id || null, is_featured: form.is_featured,
-      created_by: profile?.id,
+      subject: form.subject, description: form.description, coverUrl: form.cover_url,
+      shelfLocation: form.shelf_location, totalCopies: parseInt(form.total_copies) || 1,
+      categoryId: form.category_id || null, isFeatured: form.is_featured,
     };
 
-    if (editItem) {
-      const { error } = await supabase.from('collections').update(payload).eq('id', editItem.id);
-      if (!error) { await fetchCollections(); setShowModal(false); }
-    } else {
-      const barcode = generateBarcode(crypto.randomUUID());
-      const { error } = await supabase.from('collections').insert({ ...payload, barcode });
-      if (!error) { await fetchCollections(); setShowModal(false); }
-    }
+    try {
+      if (editItem) {
+        await api.put(`/collections/${editItem.id}`, payload);
+      } else {
+        await api.post('/collections', payload);
+      }
+      await fetchCollections();
+      setShowModal(false);
+    } catch {}
     setSaving(false);
   };
 
   const handleDelete = async (id: string) => {
-    await supabase.from('collections').delete().eq('id', id);
+    try {
+      await api.delete(`/collections/${id}`);
+    } catch {}
     setDeleteConfirm(null);
     await fetchCollections();
   };

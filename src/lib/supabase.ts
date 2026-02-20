@@ -1,6 +1,5 @@
-import { createClient } from '@supabase/supabase-js';
+// Placeholder - file ini dipertahankan untuk backward compatibility
+// Semua fungsionalitas Supabase telah dipindahkan ke src/lib/api.ts
+// yang berkomunikasi dengan Express backend
 
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
-
-export const supabase = createClient(supabaseUrl, supabaseAnonKey);
+export {};

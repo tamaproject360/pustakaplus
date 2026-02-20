@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { ArrowLeft, Eye, Star, Calendar, User, Download, Tag, Send } from 'lucide-react';
-import { supabase } from '../../lib/supabase';
+import api from '../../lib/api';
 import { Knowledge, Rating } from '../../lib/types';
 import { useAuth } from '../../contexts/AuthContext';
 import LoadingSpinner from '../../components/ui/LoadingSpinner';
@@ -24,18 +24,14 @@ export default function KnowledgeDetailPage() {
   useEffect(() => {
     if (!id) return;
     const fetchAll = async () => {
-      const [kRes, rRes] = await Promise.all([
-        supabase.from('knowledges').select('*, category:categories(*), tags:knowledge_tags(*), submitter:profiles!submitted_by(id, name)').eq('id', id).maybeSingle(),
-        supabase.from('ratings').select('*, user:profiles!user_id(id, name)').eq('knowledge_id', id).order('created_at', { ascending: false }),
-      ]);
-      if (kRes.data) {
-        setKnowledge(kRes.data as Knowledge);
-        supabase.from('knowledges').update({ views_count: (kRes.data.views_count || 0) + 1 }).eq('id', id);
+      const res = await api.get<Knowledge>(`/knowledges/${id}`);
+      if (res.data) {
+        setKnowledge(res.data);
+        setRatings(res.data.ratings || []);
       } else navigate('/knowledge');
-      if (rRes.data) setRatings(rRes.data as Rating[]);
       setLoading(false);
     };
-    fetchAll();
+    fetchAll().catch(() => navigate('/knowledge'));
   }, [id, navigate]);
 
   useEffect(() => {
@@ -52,18 +48,21 @@ export default function KnowledgeDetailPage() {
   const handleRating = async () => {
     if (!user || !knowledge || !userRating) return;
     setRatingLoading(true);
-
-    if (existingRating) {
-      const { error } = await supabase.from('ratings').update({ rating: userRating, review: userReview }).eq('id', existingRating.id);
-      if (!error) {
-        setRatings(prev => prev.map(r => r.id === existingRating.id ? { ...r, rating: userRating, review: userReview } : r));
+    try {
+      const res = await api.post<Rating>(`/knowledges/${knowledge.id}/rating`, {
+        rating: userRating,
+        review: userReview,
+      });
+      if (res.data) {
+        if (existingRating) {
+          setRatings(prev => prev.map(r => r.id === existingRating.id ? res.data! : r));
+        } else {
+          setRatings(prev => [res.data!, ...prev]);
+          setExistingRating(res.data);
+        }
       }
-    } else {
-      const { data, error } = await supabase.from('ratings').insert({ knowledge_id: knowledge.id, user_id: user.id, rating: userRating, review: userReview }).select('*, user:profiles!user_id(id, name)').single();
-      if (!error && data) {
-        setRatings(prev => [data as Rating, ...prev]);
-        setExistingRating(data as Rating);
-      }
+    } catch {
+      // silent fail
     }
     setRatingLoading(false);
   };

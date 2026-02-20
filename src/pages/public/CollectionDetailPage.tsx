@@ -5,7 +5,7 @@ import {
   Tag, Globe, ArrowLeft, BookMarked, AlertCircle, CheckCircle,
   Download, Eye
 } from 'lucide-react';
-import { supabase } from '../../lib/supabase';
+import api from '../../lib/api';
 import { Collection } from '../../lib/types';
 import { useAuth } from '../../contexts/AuthContext';
 import LoadingSpinner from '../../components/ui/LoadingSpinner';
@@ -27,38 +27,26 @@ export default function CollectionDetailPage() {
 
   useEffect(() => {
     if (!id) return;
-    supabase
-      .from('collections')
-      .select('*, category:categories(*), tags:collection_tags(*), profiles!created_by(id, name)')
-      .eq('id', id)
-      .maybeSingle()
-      .then(({ data }) => {
-        if (data) setCollection(data as Collection);
-        else navigate('/catalog');
-        setLoading(false);
-      });
+    api.get<Collection>(`/collections/${id}`).then(res => {
+      if (res.data) setCollection(res.data);
+      else navigate('/catalog');
+      setLoading(false);
+    }).catch(() => navigate('/catalog'));
   }, [id, navigate]);
 
   const handleBorrow = async () => {
     if (!user || !collection) return;
     setBorrowLoading(true);
-    const dueDate = new Date();
-    dueDate.setDate(dueDate.getDate() + 14);
-
-    const { error } = await supabase.from('borrowings').insert({
-      user_id: user.id,
-      collection_id: collection.id,
-      due_date: dueDate.toISOString(),
-    });
-
-    if (!error) {
-      await supabase.from('collections').update({ available_copies: collection.available_copies - 1 }).eq('id', collection.id);
+    try {
+      await api.post('/borrowings', { collectionId: collection.id });
       setCollection(prev => prev ? { ...prev, available_copies: prev.available_copies - 1 } : prev);
+      const dueDate = new Date();
+      dueDate.setDate(dueDate.getDate() + 14);
       setMessage(`Buku berhasil dipinjam! Jatuh tempo: ${formatDate(dueDate.toISOString())}`);
       setShowBorrowModal(false);
       setShowSuccessModal(true);
-    } else {
-      setMessage('Gagal meminjam. ' + error.message);
+    } catch (err) {
+      setMessage('Gagal meminjam. ' + (err instanceof Error ? err.message : 'Terjadi kesalahan.'));
     }
     setBorrowLoading(false);
   };
@@ -66,17 +54,12 @@ export default function CollectionDetailPage() {
   const handleReserve = async () => {
     if (!user || !collection) return;
     setReserveLoading(true);
-
-    const { error } = await supabase.from('reservations').insert({
-      user_id: user.id,
-      collection_id: collection.id,
-    });
-
-    if (!error) {
+    try {
+      await api.post('/reservations', { collectionId: collection.id });
       setMessage('Reservasi berhasil! Anda akan diberitahu saat buku tersedia.');
       setShowSuccessModal(true);
-    } else {
-      setMessage('Gagal membuat reservasi. ' + error.message);
+    } catch (err) {
+      setMessage('Gagal membuat reservasi. ' + (err instanceof Error ? err.message : 'Terjadi kesalahan.'));
     }
     setReserveLoading(false);
   };

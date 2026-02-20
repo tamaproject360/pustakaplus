@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { Search, Brain, X, Filter } from 'lucide-react';
-import { supabase } from '../../lib/supabase';
+import api from '../../lib/api';
 import { Knowledge, Category } from '../../lib/types';
 import KnowledgeCard from '../../components/knowledge/KnowledgeCard';
 import LoadingSpinner from '../../components/ui/LoadingSpinner';
@@ -30,38 +30,24 @@ export default function KnowledgeBasePage() {
 
   const fetchData = useCallback(async () => {
     setLoading(true);
-    let q = supabase
-      .from('knowledges')
-      .select('*, category:categories(*), tags:knowledge_tags(*), submitter:profiles!submitted_by(id, name)', { count: 'exact' })
-      .eq('status', 'published');
+    const params = new URLSearchParams();
+    params.set('status', 'published');
+    if (query) params.set('search', query);
+    if (filters.type) params.set('type', filters.type);
+    if (filters.categoryId) params.set('categoryId', filters.categoryId);
+    params.set('sort', sort);
+    params.set('page', String(page));
+    params.set('limit', String(PAGE_SIZE));
 
-    if (query) q = q.or(`title.ilike.%${query}%,summary.ilike.%${query}%,content.ilike.%${query}%`);
-    if (filters.type) q = q.eq('type', filters.type);
-    if (filters.categoryId) q = q.eq('category_id', filters.categoryId);
-
-    if (activeTab === 'recent') {
-      const weekAgo = new Date();
-      weekAgo.setDate(weekAgo.getDate() - 30);
-      q = q.gte('published_at', weekAgo.toISOString());
-    }
-
-    if (sort === 'newest') q = q.order('published_at', { ascending: false });
-    else if (sort === 'oldest') q = q.order('published_at', { ascending: true });
-    else if (sort === 'popular') q = q.order('views_count', { ascending: false });
-    else if (sort === 'rating') q = q.order('average_rating', { ascending: false });
-
-    const from = (page - 1) * PAGE_SIZE;
-    q = q.range(from, from + PAGE_SIZE - 1);
-
-    const { data, count } = await q;
-    if (data) setKnowledge(data as Knowledge[]);
-    if (count !== null) setTotal(count);
+    const res = await api.get<Knowledge[]>(`/knowledges?${params.toString()}`);
+    if (res.data) setKnowledge(res.data);
+    if (res.meta) setTotal(res.meta.total);
     setLoading(false);
   }, [query, filters, page, sort, activeTab]);
 
   useEffect(() => {
-    supabase.from('categories').select('*').eq('type', 'knowledge').then(({ data }) => {
-      if (data) setCategories(data);
+    api.get<Category[]>('/dashboard/categories?type=knowledge').then(res => {
+      if (res.data) setCategories(res.data);
     });
   }, []);
 

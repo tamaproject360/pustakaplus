@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { BookOpen, BookMarked, Brain, Users, AlertCircle, Clock, TrendingUp, CheckCircle, ArrowRight, Calendar } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LineChart, Line, PieChart, Pie, Cell } from 'recharts';
-import { supabase } from '../../lib/supabase';
+import api from '../../lib/api';
 import { useAuth } from '../../contexts/AuthContext';
 import { Borrowing, Knowledge } from '../../lib/types';
 import StatsCard from '../../components/ui/StatsCard';
@@ -20,35 +20,33 @@ export default function DashboardPage() {
 
   useEffect(() => {
     const fetchStats = async () => {
-      const queries = [
-        supabase.from('collections').select('id', { count: 'exact', head: true }),
-        supabase.from('borrowings').select('id', { count: 'exact', head: true }),
-        supabase.from('borrowings').select('id', { count: 'exact', head: true }).eq('status', 'dipinjam'),
-        supabase.from('knowledges').select('id', { count: 'exact', head: true }).eq('status', 'published'),
-        supabase.from('profiles').select('id', { count: 'exact', head: true }),
-        supabase.from('borrowings').select('id', { count: 'exact', head: true }).eq('status', 'terlambat'),
-        supabase.from('guest_book').select('id', { count: 'exact', head: true }),
-        supabase.from('knowledges').select('id', { count: 'exact', head: true }).eq('status', 'submitted'),
-      ];
+      const res = await api.get<{
+        totalCollections: number;
+        totalBorrowings: number;
+        activeBorrowings: number;
+        publishedKnowledge: number;
+        totalUsers: number;
+        overdueItems: number;
+        totalVisits: number;
+        pendingReviews: number;
+        recentBorrowings: Borrowing[];
+        recentKnowledge: Knowledge[];
+      }>('/dashboard/stats');
 
-      const results = await Promise.all(queries);
-      setStats({
-        collections: results[0].count || 0,
-        borrowings: results[1].count || 0,
-        activeBorrowings: results[2].count || 0,
-        knowledge: results[3].count || 0,
-        users: results[4].count || 0,
-        overdue: results[5].count || 0,
-        visits: results[6].count || 0,
-        pendingReview: results[7].count || 0,
-      });
-
-      const [borrowingsRes, knowledgeRes] = await Promise.all([
-        supabase.from('borrowings').select('*, collection:collections(title, cover_url), user:profiles!user_id(name)').order('created_at', { ascending: false }).limit(5),
-        supabase.from('knowledges').select('*, submitter:profiles!submitted_by(name)').eq('status', 'published').order('published_at', { ascending: false }).limit(5),
-      ]);
-      if (borrowingsRes.data) setRecentBorrowings(borrowingsRes.data as Borrowing[]);
-      if (knowledgeRes.data) setRecentKnowledge(knowledgeRes.data as Knowledge[]);
+      if (res.data) {
+        setStats({
+          collections: res.data.totalCollections,
+          borrowings: res.data.totalBorrowings,
+          activeBorrowings: res.data.activeBorrowings,
+          knowledge: res.data.publishedKnowledge,
+          users: res.data.totalUsers,
+          overdue: res.data.overdueItems,
+          visits: res.data.totalVisits,
+          pendingReview: res.data.pendingReviews,
+        });
+        setRecentBorrowings(res.data.recentBorrowings || []);
+        setRecentKnowledge(res.data.recentKnowledge || []);
+      }
 
       const months = ['Jan','Feb','Mar','Apr','Mei','Jun','Jul','Ags','Sep','Okt','Nov','Des'];
       const currentMonth = new Date().getMonth();

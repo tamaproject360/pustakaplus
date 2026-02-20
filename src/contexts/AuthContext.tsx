@@ -1,10 +1,15 @@
-import React, { createContext, useContext, useEffect, useState } from 'react';
-import { User } from '@supabase/supabase-js';
-import { supabase } from '../lib/supabase';
+import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
+import api, { setToken, removeToken } from '../lib/api';
 import { Profile, UserRole } from '../lib/types';
 
+interface AuthUser {
+  id: string;
+  email: string;
+  role: UserRole;
+}
+
 interface AuthContextType {
-  user: User | null;
+  user: AuthUser | null;
   profile: Profile | null;
   loading: boolean;
   signIn: (email: string, password: string) => Promise<{ error: Error | null }>;
@@ -17,69 +22,88 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const [user, setUser] = useState<User | null>(null);
+  const [user, setUser] = useState<AuthUser | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
   const [loading, setLoading] = useState(true);
 
-  const fetchProfile = async (userId: string) => {
-    const { data } = await supabase
-      .from('profiles')
-      .select('*')
-      .eq('id', userId)
-      .maybeSingle();
-    if (data) setProfile(data);
-  };
-
-  const refreshProfile = async () => {
-    if (user) await fetchProfile(user.id);
-  };
-
-  useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setUser(session?.user ?? null);
-      if (session?.user) {
-        fetchProfile(session.user.id).finally(() => setLoading(false));
-      } else {
-        setLoading(false);
+  const fetchProfile = useCallback(async () => {
+    try {
+      const res = await api.get<Profile>('/auth/me');
+      if (res.data) {
+        setProfile(res.data);
+        setUser({ id: res.data.id, email: res.data.email, role: res.data.role });
       }
-    });
-
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
-      setUser(session?.user ?? null);
-      if (session?.user) {
-        (async () => {
-          await fetchProfile(session.user.id);
-        })();
-      } else {
-        setProfile(null);
-      }
-    });
-
-    return () => subscription.unsubscribe();
+    } catch {
+      removeToken();
+      setUser(null);
+      setProfile(null);
+    }
   }, []);
 
-  const signIn = async (email: string, password: string) => {
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
-    return { error };
+  const refreshProfile = useCallback(async () => {
+    await fetchProfile();
+  }, [fetchProfile]);
+
+  useEffect(() => {
+    const token = localStorage.getItem('pustakaplus_token');
+    if (token) {
+      fetchProfile().finally(() => setLoading(false));
+    } else {
+      setLoading(false);
+    }
+  }, [fetchProfile]);
+
+  const signIn = async (email: string, password: string): Promise<{ error: Error | null }> => {
+    try {
+      const res = await api.post<{ token: string; user: Profile }>('/auth/login', { email, password });
+      if (res.data?.token) {
+        setToken(res.data.token);
+        setProfile(res.data.user);
+        setUser({ id: res.data.user.id, email: res.data.user.email, role: res.data.user.role });
+      }
+      return { error: null };
+    } catch (err) {
+      return { error: err instanceof Error ? err : new Error('Login gagal.') };
+    }
   };
 
-  const signUp = async (email: string, password: string, name: string, unitKerja?: string) => {
-    const { error } = await supabase.auth.signUp({
-      email,
-      password,
-      options: {
-        data: { name, unit_kerja: unitKerja },
-      },
-    });
-    return { error };
+  const signUp = async (
+    email: string,
+    password: string,
+    name: string,
+    unitKerja?: string
+  ): Promise<{ error: Error | null }> => {
+    try {
+      const res = await api.post<{ token: string; user: Profile }>('/auth/register', {
+        email,
+        password,
+        name,
+        unitKerja,
+      });
+      if (res.data?.token) {
+        setToken(res.data.token);
+        setProfile(res.data.user);
+        setUser({ id: res.data.user.id, email: res.data.user.email, role: res.data.user.role });
+      }
+      return { error: null };
+    } catch (err) {
+      return { error: err instanceof Error ? err : new Error('Registrasi gagal.') };
+    }
   };
 
   const signOut = async () => {
-    await supabase.auth.signOut();
-    setProfile(null);
+    try {
+      await api.post('/auth/logout');
+    } catch {
+      // ignore logout error
+    } finally {
+      removeToken();
+      setUser(null);
+      setProfile(null);
+    }
   };
 
-  const hasRole = (roles: UserRole | UserRole[]) => {
+  const hasRole = (roles: UserRole | UserRole[]): boolean => {
     if (!profile) return false;
     const roleArray = Array.isArray(roles) ? roles : [roles];
     return roleArray.includes(profile.role);

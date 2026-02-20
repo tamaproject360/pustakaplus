@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Search, ClipboardList, RefreshCw } from 'lucide-react';
-import { supabase } from '../../lib/supabase';
+import api from '../../lib/api';
 import { AuditLog } from '../../lib/types';
 import LoadingSpinner from '../../components/ui/LoadingSpinner';
 import EmptyState from '../../components/ui/EmptyState';
@@ -14,20 +14,14 @@ export default function AuditLogsPage() {
 
   const fetchLogs = useCallback(async () => {
     setLoading(true);
-    let q = supabase
-      .from('audit_logs')
-      .select('*, user:profiles!user_id(id, name, email)')
-      .order('created_at', { ascending: false })
-      .limit(100);
-
-    if (entityFilter) q = q.eq('entity_type', entityFilter);
-    const { data } = await q;
-    if (data) {
-      const filtered = search
-        ? (data as AuditLog[]).filter(l => l.action.toLowerCase().includes(search.toLowerCase()) || l.entity_type.toLowerCase().includes(search.toLowerCase()))
-        : (data as AuditLog[]);
-      setLogs(filtered);
-    }
+    try {
+      const params = new URLSearchParams();
+      if (entityFilter) params.set('entityType', entityFilter);
+      if (search) params.set('search', search);
+      const query = params.toString() ? `?${params.toString()}` : '';
+      const res = await api.get<AuditLog[]>(`/audit-logs${query}`);
+      if (res.data) setLogs(res.data);
+    } catch {}
     setLoading(false);
   }, [search, entityFilter]);
 
