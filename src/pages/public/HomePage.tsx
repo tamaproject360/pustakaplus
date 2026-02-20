@@ -65,7 +65,7 @@ export default function HomePage() {
           </div>
 
           <h1 className="text-4xl md:text-5xl lg:text-6xl font-bold text-white leading-tight mb-6">
-            Perpustakaan & Knowledge
+            Perpustakaan & Knowledge Management dalam
             <span className="block mt-1" style={{ color: '#F59E0B' }}>Satu Platform Terpadu</span>
           </h1>
 
